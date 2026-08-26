@@ -26,7 +26,11 @@ from .audio_utils import (
 from .separator import separate_audio
 
 
-OUTPUT_FORMATS = {".wav", ".flac", ".mp3"}
+OUTPUT_FORMATS = {".wav", ".flac", ".mp3", ".m4a"}
+LOSSY_ENCODING_OPTIONS = {
+    ".mp3": ["-codec:a", "libmp3lame", "-q:a", "2"],
+    ".m4a": ["-codec:a", "aac", "-b:a", "192k"],
+}
 
 
 def write_output_audio(
@@ -34,7 +38,7 @@ def write_output_audio(
     audio: np.ndarray,
     sample_rate: int,
 ) -> None:
-    """Write audio as WAV, FLAC, or MP3 based on the output extension."""
+    """Write audio as WAV, FLAC, MP3, or M4A based on the output extension."""
     output_path = Path(output_path)
     output_format = output_path.suffix.lower()
 
@@ -53,7 +57,7 @@ def write_output_audio(
 
     ffmpeg_path = shutil.which("ffmpeg")
     if ffmpeg_path is None:
-        raise RuntimeError("MP3 output requires ffmpeg to be installed and available in PATH.")
+        raise RuntimeError("MP3 and M4A output require ffmpeg to be installed and available in PATH.")
 
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
         temp_path = Path(temp_file.name)
@@ -68,10 +72,7 @@ def write_output_audio(
                 "error",
                 "-i",
                 str(temp_path),
-                "-codec:a",
-                "libmp3lame",
-                "-q:a",
-                "2",
+                *LOSSY_ENCODING_OPTIONS[output_format],
                 str(output_path),
             ],
             check=True,

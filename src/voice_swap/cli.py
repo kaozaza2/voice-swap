@@ -58,7 +58,7 @@ def train_model(ctx: click.Context, data: str, output: str, epochs: int | None) 
     "--output",
     "-o",
     required=True,
-    help="Output path (.wav, .flac, or .mp3)",
+    help="Output path (.wav, .flac, .mp3, or .m4a)",
 )
 @click.option("--reference", "-r", default=None, help="Reference audio for voice quality")
 @click.option("--instrumental-mix", default=0.15, help="Mix ratio for instrumental (0.0-1.0)")
@@ -107,7 +107,7 @@ def convert(
     "--output",
     "-o",
     default=None,
-    help="Output path (.wav, .flac, or .mp3; default: <song>_cover.wav)",
+    help="Output path (.wav, .flac, .mp3, or .m4a; default: <song>_cover.wav)",
 )
 @click.option("--force", "-f", is_flag=True, help="Overwrite output if exists")
 @click.option("--reference", "-r", default=None, help="Reference audio for voice quality")

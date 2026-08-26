@@ -206,7 +206,7 @@ voice-swap cover \
 |--------|---------|-------------|
 | `--model` | (required) | Model checkpoint path |
 | `--song` | (required) | Input song path |
-| `--output` | (required) | Output file path (`.wav`, `.flac`, or `.mp3`) |
+| `--output` | (required) | Output file path (`.wav`, `.flac`, `.mp3`, or `.m4a`) |
 | `--reference` | None | Reference audio for voice quality |
 | `--instrumental-mix` | `0.15` | Instrumental mix ratio (0.0-1.0) |
 
@@ -225,7 +225,7 @@ voice-swap convert \
 |--------|---------|-------------|
 | `--model` | (required) | Model checkpoint path |
 | `--input` | (required) | Input audio path |
-| `--output` | (required) | Output file path (`.wav`, `.flac`, or `.mp3`) |
+| `--output` | (required) | Output file path (`.wav`, `.flac`, `.mp3`, or `.m4a`) |
 | `--reference` | None | Reference audio for voice quality |
 | `--instrumental-mix` | `0.15` | Mix with instrumental (0.0 = off) |
 | `--no-separate` | False | Skip stem separation |
@@ -236,12 +236,13 @@ voice-swap convert \
 ### Output Formats
 
 The `convert` and `cover` commands select the output format from the `--output`
-file extension. WAV, FLAC, and MP3 are supported. MP3 encoding requires ffmpeg,
-which is already listed as an installation prerequisite.
+file extension. WAV, FLAC, MP3, and M4A are supported. MP3 and M4A encoding
+require ffmpeg, which is already listed as an installation prerequisite.
 
 ```bash
 voice-swap cover --model checkpoints/best.pth --song song.wav --output my_cover.flac
 voice-swap convert --model checkpoints/best.pth --input vocals.wav --output converted.mp3
+voice-swap cover --model checkpoints/best.pth --song song.wav --output my_cover.m4a
 ```
 
 ### `voice-swap separate`
