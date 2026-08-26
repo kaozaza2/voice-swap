@@ -53,6 +53,19 @@ uv pip install -e .
 voice-swap info
 ```
 
+### Run from the Repository
+
+`main.py` forwards directly to the same CLI, which is useful when working from
+a project checkout:
+
+```bash
+python main.py --help
+python main.py info
+```
+
+Use `voice-swap` after the editable installation above, or replace it with
+`python main.py` in any command shown in this guide.
+
 ### Windows-Specific Setup
 
 ```powershell
@@ -193,7 +206,7 @@ voice-swap cover \
 |--------|---------|-------------|
 | `--model` | (required) | Model checkpoint path |
 | `--song` | (required) | Input song path |
-| `--output` | (required) | Output file path |
+| `--output` | (required) | Output file path (`.wav`, `.flac`, or `.mp3`) |
 | `--reference` | None | Reference audio for voice quality |
 | `--instrumental-mix` | `0.15` | Instrumental mix ratio (0.0-1.0) |
 
@@ -212,7 +225,7 @@ voice-swap convert \
 |--------|---------|-------------|
 | `--model` | (required) | Model checkpoint path |
 | `--input` | (required) | Input audio path |
-| `--output` | (required) | Output file path |
+| `--output` | (required) | Output file path (`.wav`, `.flac`, or `.mp3`) |
 | `--reference` | None | Reference audio for voice quality |
 | `--instrumental-mix` | `0.15` | Mix with instrumental (0.0 = off) |
 | `--no-separate` | False | Skip stem separation |
