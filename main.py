@@ -1,5 +1,6 @@
-def main():
-    print("Hello from voice-swap!")
+"""Run the Voice Swap command-line interface."""
+
+from voice_swap.cli import main
 
 
 if __name__ == "__main__":
