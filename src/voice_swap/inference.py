@@ -1,5 +1,8 @@
 """Inference and song conversion with high-quality output."""
 
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
 import librosa
@@ -21,6 +24,60 @@ from .audio_utils import (
     add_reverb,
 )
 from .separator import separate_audio
+
+
+OUTPUT_FORMATS = {".wav", ".flac", ".mp3"}
+
+
+def write_output_audio(
+    output_path: str | Path,
+    audio: np.ndarray,
+    sample_rate: int,
+) -> None:
+    """Write audio as WAV, FLAC, or MP3 based on the output extension."""
+    output_path = Path(output_path)
+    output_format = output_path.suffix.lower()
+
+    if output_format not in OUTPUT_FORMATS:
+        supported_formats = ", ".join(sorted(OUTPUT_FORMATS))
+        raise ValueError(
+            f"Unsupported output format '{output_path.suffix}'. "
+            f"Use one of: {supported_formats}."
+        )
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if output_format in {".wav", ".flac"}:
+        sf.write(str(output_path), audio, sample_rate)
+        return
+
+    ffmpeg_path = shutil.which("ffmpeg")
+    if ffmpeg_path is None:
+        raise RuntimeError("MP3 output requires ffmpeg to be installed and available in PATH.")
+
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+        temp_path = Path(temp_file.name)
+
+    try:
+        sf.write(str(temp_path), audio, sample_rate)
+        subprocess.run(
+            [
+                ffmpeg_path,
+                "-y",
+                "-loglevel",
+                "error",
+                "-i",
+                str(temp_path),
+                "-codec:a",
+                "libmp3lame",
+                "-q:a",
+                "2",
+                str(output_path),
+            ],
+            check=True,
+        )
+    finally:
+        temp_path.unlink(missing_ok=True)
 
 
 def load_model(
@@ -173,7 +230,7 @@ def convert_song(
 
     output_audio = np.clip(output_audio, -0.99, 0.99)
 
-    sf.write(str(output_path), output_audio, config.audio.sample_rate)
+    write_output_audio(output_path, output_audio, config.audio.sample_rate)
     print(f"Saved converted audio to {output_path}")
 
 
@@ -207,8 +264,6 @@ def convert_with_instrumental(
     Args:
         instrumental_path: If provided, use this instrumental track instead of separating
     """
-    import tempfile
-
     if config is None:
         config = Config()
 
@@ -266,9 +321,8 @@ def convert_with_instrumental(
     mixed = normalize_volume(mixed, target_db=-18.0)
     mixed = np.clip(mixed, -0.99, 0.99)
 
-    sf.write(str(output_path), mixed, config.audio.sample_rate)
+    write_output_audio(output_path, mixed, config.audio.sample_rate)
     print(f"Saved final cover to {output_path}")
 
     # Cleanup temp files
-    import shutil
     shutil.rmtree(temp_dir, ignore_errors=True)

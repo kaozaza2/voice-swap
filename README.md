@@ -107,6 +107,10 @@ Training time:
 - GPU: ~2-4 hours
 - CPU: ~24-48 hours (not recommended)
 
+The CLI shows progress and an estimated time remaining while preprocessing,
+training, conversion, and source separation run. Training progress covers all
+epochs, and shows the current generator and discriminator losses.
+
 Checkpoints are saved to `checkpoints/`.
 
 ### 4. Cover a Song
@@ -215,6 +219,17 @@ voice-swap convert \
 | `--no-smooth` | False | Skip audio smoothing |
 | `--no-denoise` | False | Skip denoising |
 | `--no-normalize` | False | Skip volume normalization |
+
+### Output Formats
+
+The `convert` and `cover` commands select the output format from the `--output`
+file extension. WAV, FLAC, and MP3 are supported. MP3 encoding requires ffmpeg,
+which is already listed as an installation prerequisite.
+
+```bash
+voice-swap cover --model checkpoints/best.pth --song song.wav --output my_cover.flac
+voice-swap convert --model checkpoints/best.pth --input vocals.wav --output converted.mp3
+```
 
 ### `voice-swap separate`
 

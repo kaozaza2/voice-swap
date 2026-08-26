@@ -114,6 +114,13 @@ def train(
     )
 
     best_loss = float("inf")
+    total_batches = len(dataloader) * config.train.epochs
+    progress_bar = tqdm(
+        total=total_batches,
+        desc="Training",
+        unit="batch",
+        dynamic_ncols=True,
+    )
 
     for epoch in range(config.train.epochs):
         model.train()
@@ -124,8 +131,8 @@ def train(
         total_gen_loss = 0
         total_disc_loss = 0
 
-        pbar = tqdm(dataloader, desc=f"Epoch {epoch + 1}/{config.train.epochs}")
-        for batch in pbar:
+        progress_bar.set_description(f"Epoch {epoch + 1}/{config.train.epochs}")
+        for batch in dataloader:
             source_mel = batch["mel"].to(device)
             ref_mel = batch["ref_mel"].to(device)
             target_mel = batch["mel"].to(device)
@@ -200,7 +207,8 @@ def train(
 
             total_gen_loss += gen_loss.item()
             total_disc_loss += disc_loss.item()
-            pbar.set_postfix(
+            progress_bar.update()
+            progress_bar.set_postfix(
                 gen=f"{gen_loss.item():.4f}",
                 disc=f"{disc_loss.item():.4f}",
             )
@@ -230,4 +238,5 @@ def train(
                 torch.save(checkpoint, output_dir / "best.pth")
                 print(f"Saved best model (gen_loss={best_loss:.4f})")
 
+    progress_bar.close()
     print("Training complete!")

@@ -54,7 +54,12 @@ def train_model(ctx: click.Context, data: str, output: str, epochs: int | None) 
 @main.command()
 @click.option("--model", "-m", required=True, help="Model checkpoint path")
 @click.option("--input", "-i", required=True, help="Input song path")
-@click.option("--output", "-o", required=True, help="Output path for converted audio")
+@click.option(
+    "--output",
+    "-o",
+    required=True,
+    help="Output path (.wav, .flac, or .mp3)",
+)
 @click.option("--reference", "-r", default=None, help="Reference audio for voice quality")
 @click.option("--instrumental-mix", default=0.15, help="Mix ratio for instrumental (0.0-1.0)")
 @click.option("--no-separate", is_flag=True, help="Skip stem separation")
@@ -98,7 +103,12 @@ def convert(
 @click.option("--model", "-m", required=True, help="Model checkpoint path")
 @click.option("--song", "-s", required=True, help="Input song path")
 @click.option("--instrumental", "-i", default=None, help="External instrumental track (skips separation)")
-@click.option("--output", "-o", default=None, help="Output path (default: <song>_cover.wav)")
+@click.option(
+    "--output",
+    "-o",
+    default=None,
+    help="Output path (.wav, .flac, or .mp3; default: <song>_cover.wav)",
+)
 @click.option("--force", "-f", is_flag=True, help="Overwrite output if exists")
 @click.option("--reference", "-r", default=None, help="Reference audio for voice quality")
 @click.option("--instrumental-mix", default=0.15, help="Mix ratio for instrumental (0.0-1.0)")
