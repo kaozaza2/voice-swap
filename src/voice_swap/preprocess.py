@@ -244,9 +244,11 @@ def _save_feature_shard(
 
 def save_features(features: list[dict], path: Path) -> None:
     """Save extracted features to disk."""
+    # librosa.pyin returns float64; store float32 so the pitch loss does not
+    # promote the whole generator loss to double (CUDA rejects double grads).
     batch = {
-        "mel": torch.tensor(np.array([f["mel"] for f in features])),
-        "pitch": torch.tensor(np.array([f["pitch"] for f in features])),
+        "mel": torch.tensor(np.array([f["mel"] for f in features]), dtype=torch.float32),
+        "pitch": torch.tensor(np.array([f["pitch"] for f in features]), dtype=torch.float32),
     }
     torch.save(batch, path)
 

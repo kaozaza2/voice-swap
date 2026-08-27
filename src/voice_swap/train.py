@@ -40,7 +40,8 @@ class VoiceDataset(Dataset):
 
         return {
             "mel": mel.transpose(0, 1).contiguous(),
-            "pitch": pitch,
+            # Cast so shards written before pitch was stored as float32 still work.
+            "pitch": pitch.float(),
             "ref_mel": ref_mel.transpose(0, 1).contiguous(),
         }
 
