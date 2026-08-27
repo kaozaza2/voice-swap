@@ -1,6 +1,6 @@
 """Configuration management."""
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import yaml
@@ -15,6 +15,7 @@ class AudioConfig:
     fmin: int = 0
     fmax: int = 8000
     segment_length: int = 16384  # ~0.37s at 44100Hz
+    segment_hop_length: int = 8192  # 50% overlap between training segments
 
 
 @dataclass
@@ -38,6 +39,7 @@ class TrainConfig:
     grad_clip: float = 1.0
     warmup_steps: int = 4000
     fp16: bool = True
+    keep_last_checkpoints: int = 0  # 0 keeps every epoch checkpoint
 
 
 @dataclass
@@ -63,5 +65,7 @@ class Config:
         return config
 
     def save(self, path: str | Path) -> None:
+        # asdict() so the nested configs land as plain dicts; dumping
+        # self.__dict__ emitted !!python/object tags that from_yaml cannot read.
         with open(path, "w") as f:
-            yaml.dump(self.__dict__, f, default_flow_style=False)
+            yaml.dump(asdict(self), f, default_flow_style=False, sort_keys=False)

@@ -29,11 +29,23 @@ def main(ctx: click.Context, config: str | None, device: str) -> None:
 @main.command()
 @click.option("--input", "-i", required=True, help="Input directory with audio files")
 @click.option("--output", "-o", default="data/processed", help="Output directory")
+@click.option(
+    "--workers",
+    "-w",
+    type=click.IntRange(min=0),
+    default=0,
+    help="Parallel worker count (0: choose automatically)",
+)
 @click.pass_context
-def preprocess(ctx: click.Context, input: str, output: str) -> None:
+def preprocess(ctx: click.Context, input: str, output: str, workers: int) -> None:
     """Preprocess audio files for training."""
     config = ctx.obj["config"]
-    n_segments = preprocess_dataset(input, output, config.audio)
+    n_segments = preprocess_dataset(
+        input,
+        output,
+        config.audio,
+        workers=workers or None,
+    )
     click.echo(f"Preprocessing complete: {n_segments} segments extracted")
 
 
@@ -41,13 +53,25 @@ def preprocess(ctx: click.Context, input: str, output: str) -> None:
 @click.option("--data", "-d", required=True, help="Processed features directory")
 @click.option("--output", "-o", default="checkpoints", help="Output directory for checkpoints")
 @click.option("--epochs", "-e", type=int, default=None, help="Number of epochs")
+@click.option(
+    "--resume",
+    type=click.Path(exists=True),
+    default=None,
+    help="Checkpoint to resume training from",
+)
 @click.pass_context
-def train_model(ctx: click.Context, data: str, output: str, epochs: int | None) -> None:
+def train_model(
+    ctx: click.Context,
+    data: str,
+    output: str,
+    epochs: int | None,
+    resume: str | None,
+) -> None:
     """Train voice conversion model."""
     config = ctx.obj["config"]
     if epochs:
         config.train.epochs = epochs
-    train(data, output, config)
+    train(data, output, config, resume=resume)
     click.echo("Training complete!")
 
 

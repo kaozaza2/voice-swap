@@ -102,13 +102,19 @@ mkdir -p data/raw
 ### 2. Preprocess Audio
 
 ```bash
-voice-swap preprocess --input data/raw --output data/processed
+voice-swap preprocess --input data/raw --output data/processed --workers 4
 ```
 
 This extracts:
 - Mel spectrograms
 - Pitch contours
 - Speaker features
+
+M4A and other formats that libsndfile cannot decode are read through ffmpeg, so
+keep ffmpeg installed and available in your `PATH`.
+
+Preprocessing uses 50% segment overlap by default and writes bounded feature
+shards, avoiding repeated full-dataset checkpoint writes.
 
 ### 3. Train Model
 
@@ -174,8 +180,9 @@ voice-swap preprocess --input <input_dir> --output <output_dir>
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--input` | (required) | Directory with .wav files |
+| `--input` | (required) | Directory with supported audio files |
 | `--output` | `data/processed` | Output directory |
+| `--workers` | `0` | Parallel workers (`0` chooses automatically) |
 
 ### `voice-swap train-model`
 
@@ -372,6 +379,8 @@ audio:
   hop_length: 512
   n_fft: 2048
   n_mels: 128
+  segment_length: 16384
+  segment_hop_length: 8192
 
 model:
   hidden_dim: 256

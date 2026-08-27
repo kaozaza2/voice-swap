@@ -9,24 +9,43 @@ from torch.nn.utils import weight_norm, spectral_norm
 class ResBlock(nn.Module):
     """Residual block with dilated convolutions."""
 
-    def __init__(self, channels: int, kernel_size: int = 3, dilation: int = 1):
+    def __init__(
+        self,
+        channels: int,
+        kernel_size: int = 3,
+        dilations: int | list[int] = 1,
+    ):
         super().__init__()
-        self.conv1 = weight_norm(
-            nn.Conv1d(
-                channels, channels, kernel_size, dilation=dilation, padding=kernel_size // 2 * dilation
+        if isinstance(dilations, int):
+            dilations = [dilations]
+
+        self.convs1 = nn.ModuleList([
+            weight_norm(
+                nn.Conv1d(
+                    channels,
+                    channels,
+                    kernel_size,
+                    dilation=dilation,
+                    padding=kernel_size // 2 * dilation,
+                )
             )
-        )
-        self.conv2 = weight_norm(
-            nn.Conv1d(channels, channels, kernel_size, padding=kernel_size // 2)
-        )
-        self.act1 = nn.LeakyReLU(0.1)
-        self.act2 = nn.LeakyReLU(0.1)
+            for dilation in dilations
+        ])
+        self.convs2 = nn.ModuleList([
+            weight_norm(
+                nn.Conv1d(channels, channels, kernel_size, padding=kernel_size // 2)
+            )
+            for _ in dilations
+        ])
+        self.act = nn.LeakyReLU(0.1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        residual = x
-        x = self.act1(self.conv1(x))
-        x = self.act2(self.conv2(x))
-        return x + residual
+        for conv1, conv2 in zip(self.convs1, self.convs2):
+            residual = x
+            x = self.act(conv1(self.act(x)))
+            x = conv2(x)
+            x = x + residual
+        return x
 
 
 class MultiScaleDiscriminator(nn.Module):
@@ -153,30 +172,36 @@ class MultiPeriodDiscriminator(nn.Module):
 
     def __init__(self):
         super().__init__()
+        self.periods = [2, 3, 5, 7, 11]
         self.discriminators = nn.ModuleList([
-            self._build_discriminator(2),
-            self._build_discriminator(3),
-            self._build_discriminator(5),
-            self._build_discriminator(7),
-            self._build_discriminator(11),
+            self._build_discriminator(period) for period in self.periods
         ])
 
     def _build_discriminator(self, period: int) -> nn.Module:
         return nn.ModuleDict({
-            "conv1": weight_norm(nn.Conv2d(1, 32, (1, period), (1, 1), (0, period // 2))),
-            "conv2": weight_norm(nn.Conv2d(32, 128, (1, period), (1, 1), (0, period // 2))),
-            "conv3": weight_norm(nn.Conv2d(128, 512, (1, period), (1, 1), (0, period // 2))),
-            "conv4": weight_norm(nn.Conv2d(512, 1024, (1, period), (1, 1), (0, period // 2))),
-            "conv5": weight_norm(nn.Conv2d(1024, 1024, (1, period), (1, 1), (0, period // 2))),
-            "out": weight_norm(nn.Conv2d(1024, 1, (1, 1), (1, 1), (0, 0))),
+            "conv1": weight_norm(nn.Conv2d(1, 32, (5, 1), (3, 1), (2, 0))),
+            "conv2": weight_norm(nn.Conv2d(32, 128, (5, 1), (3, 1), (2, 0))),
+            "conv3": weight_norm(nn.Conv2d(128, 512, (5, 1), (3, 1), (2, 0))),
+            "conv4": weight_norm(nn.Conv2d(512, 1024, (5, 1), (3, 1), (2, 0))),
+            "conv5": weight_norm(nn.Conv2d(1024, 1024, (5, 1), (1, 1), (2, 0))),
+            "out": weight_norm(nn.Conv2d(1024, 1, (3, 1), (1, 1), (1, 0))),
         })
+
+    @staticmethod
+    def _to_periods(x: torch.Tensor, period: int) -> torch.Tensor:
+        """Fold a (B, 1, T) waveform into (B, 1, T // period, period)."""
+        batch, channels, length = x.shape
+        if length % period != 0:
+            x = F.pad(x, (0, period - length % period), mode="reflect")
+            length = x.shape[-1]
+        return x.view(batch, channels, length // period, period)
 
     def forward(self, x: torch.Tensor) -> tuple[list[torch.Tensor], list[list[torch.Tensor]]]:
         outputs = []
         features = []
 
-        for disc in self.discriminators:
-            feat = F.leaky_relu(disc["conv1"](x), 0.1)
+        for period, disc in zip(self.periods, self.discriminators):
+            feat = F.leaky_relu(disc["conv1"](self._to_periods(x, period)), 0.1)
             feat_list = [feat]
 
             feat = F.leaky_relu(disc["conv2"](feat), 0.1)

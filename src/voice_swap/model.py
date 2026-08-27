@@ -60,7 +60,7 @@ class ConformerBlock(nn.Module):
 
         self.conv = nn.Sequential(
             nn.Conv1d(dim, dim * 2, 15, padding=7, groups=dim),
-            nn.GLU(dim=-1),
+            nn.GLU(dim=1),
             nn.Conv1d(dim, dim, 1),
         )
         self.norm2 = nn.LayerNorm(dim)
@@ -232,7 +232,7 @@ class FlowDecoder(nn.Module):
             mean, log_std = h.chunk(2, dim=-1)
             log_std = torch.clamp(log_std, -5, 5)
             x = x * torch.exp(log_std) + mean
-            log_det = log_det + log_std.sum(dim=-1)
+            log_det = log_det + log_std.sum(dim=(1, 2))
 
         return self.mel_proj(x), log_det
 

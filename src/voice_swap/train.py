@@ -1,5 +1,6 @@
 """Training loop for voice conversion model."""
 
+from bisect import bisect_right
 from pathlib import Path
 
 import torch
@@ -11,47 +12,78 @@ from .config import Config
 from .model import VoiceSwapModel
 from .hifigan import HiFiGAN, MultiScaleDiscriminator, MultiPeriodDiscriminator
 from .losses import TotalLoss, AdversarialLoss, FeatureMatchingLoss
-from .preprocess import load_features
+from .preprocess import load_feature_paths, load_features
 
 
 class VoiceDataset(Dataset):
     """Dataset for voice conversion training."""
 
     def __init__(self, features_path: Path):
-        self.features = load_features(features_path)
-        self.n_samples = self.features["mel"].shape[0]
+        feature_paths = load_feature_paths(features_path)
+        self.feature_shards = [load_features(path) for path in feature_paths]
+        self.shard_offsets = [0]
+        for features in self.feature_shards:
+            self.shard_offsets.append(self.shard_offsets[-1] + features["mel"].shape[0])
+        self.n_samples = self.shard_offsets[-1]
 
     def __len__(self) -> int:
         return self.n_samples
 
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
-        mel = self.features["mel"][idx]
-        pitch = self.features["pitch"][idx]
+        mel, pitch = self._get_features(idx)
 
         if self.n_samples > 1:
             ref_idx = torch.randint(0, self.n_samples, (1,)).item()
-            ref_mel = self.features["mel"][ref_idx]
+            ref_mel, _ = self._get_features(ref_idx)
         else:
             ref_mel = mel
 
         return {
-            "mel": mel.unsqueeze(0),
+            "mel": mel.transpose(0, 1).contiguous(),
             "pitch": pitch,
-            "ref_mel": ref_mel.unsqueeze(0),
+            "ref_mel": ref_mel.transpose(0, 1).contiguous(),
         }
+
+    def _get_features(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
+        shard_index = bisect_right(self.shard_offsets, idx) - 1
+        shard_offset = self.shard_offsets[shard_index]
+        features = self.feature_shards[shard_index]
+        sample_index = idx - shard_offset
+        return features["mel"][sample_index], features["pitch"][sample_index]
+
+
+def _prune_checkpoints(output_dir: Path, keep_last: int) -> None:
+    """Delete all but the newest `keep_last` epoch checkpoints."""
+    checkpoints = sorted(
+        output_dir.glob("checkpoint_epoch_*.pth"),
+        key=lambda path: int(path.stem.rsplit("_", 1)[1]),
+    )
+    for path in checkpoints[:-keep_last]:
+        path.unlink()
 
 
 def train(
     data_path: str | Path,
     output_dir: str | Path,
     config: Config | None = None,
+    resume: str | Path | None = None,
 ) -> None:
-    """Train the voice conversion model."""
+    """Train the voice conversion model, optionally resuming from a checkpoint."""
     if config is None:
         config = Config()
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    dataset = VoiceDataset(Path(data_path))
+    dataloader = DataLoader(
+        dataset,
+        batch_size=config.train.batch_size,
+        shuffle=True,
+        num_workers=0,
+    )
+    if len(dataloader) == 0:
+        raise ValueError("No training batches are available from the preprocessed features.")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -90,31 +122,58 @@ def train(
         optimizer_g,
         max_lr=config.train.learning_rate,
         epochs=config.train.epochs,
-        steps_per_epoch=1000,
+        steps_per_epoch=len(dataloader),
     )
 
     scheduler_d = torch.optim.lr_scheduler.OneCycleLR(
         optimizer_d,
         max_lr=config.train.learning_rate * 0.5,
         epochs=config.train.epochs,
-        steps_per_epoch=1000,
+        steps_per_epoch=len(dataloader),
     )
 
     # Initialize losses
-    criterion = TotalLoss()
+    criterion = TotalLoss().to(device)
     adv_loss = AdversarialLoss()
     feat_match_loss = FeatureMatchingLoss()
 
-    dataset = VoiceDataset(Path(data_path))
-    dataloader = DataLoader(
-        dataset,
-        batch_size=config.train.batch_size,
-        shuffle=True,
-        num_workers=0,
-    )
-
     best_loss = float("inf")
-    total_batches = len(dataloader) * config.train.epochs
+    start_epoch = 0
+
+    if resume is not None:
+        checkpoint = torch.load(resume, map_location=device, weights_only=False)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        vocoder.load_state_dict(checkpoint["vocoder_state_dict"])
+        msd.load_state_dict(checkpoint["msd_state_dict"])
+        mpd.load_state_dict(checkpoint["mpd_state_dict"])
+        optimizer_g.load_state_dict(checkpoint["optimizer_g_state_dict"])
+        optimizer_d.load_state_dict(checkpoint["optimizer_d_state_dict"])
+        scheduler_g.load_state_dict(checkpoint["scheduler_g_state_dict"])
+        scheduler_d.load_state_dict(checkpoint["scheduler_d_state_dict"])
+        start_epoch = checkpoint["epoch"]
+        best_loss = checkpoint.get("best_loss", float("inf"))
+        print(f"Resumed from {resume} at epoch {start_epoch}")
+
+        if start_epoch >= config.train.epochs:
+            raise ValueError(
+                f"Checkpoint is already at epoch {start_epoch} of {config.train.epochs}; "
+                f"this run is finished. OneCycleLR anneals across the whole run, so it "
+                f"cannot be extended in place - start a fresh run with a larger epoch "
+                f"count if you want to train longer."
+            )
+
+        # OneCycleLR's schedule spans the whole run, so a resumed run has to keep
+        # the same total length or the restored scheduler state is meaningless.
+        expected_steps = len(dataloader) * config.train.epochs
+        if scheduler_g.total_steps != expected_steps:
+            raise ValueError(
+                f"This checkpoint was trained with a OneCycleLR schedule of "
+                f"{scheduler_g.total_steps} steps, but the current settings imply "
+                f"{expected_steps} ({len(dataloader)} batches x {config.train.epochs} "
+                f"epochs). Resume with the same epochs and batch_size as the original run."
+            )
+
+    total_batches = len(dataloader) * (config.train.epochs - start_epoch)
     progress_bar = tqdm(
         total=total_batches,
         desc="Training",
@@ -122,7 +181,7 @@ def train(
         dynamic_ncols=True,
     )
 
-    for epoch in range(config.train.epochs):
+    for epoch in range(start_epoch, config.train.epochs):
         model.train()
         vocoder.train()
         msd.train()
@@ -142,8 +201,8 @@ def train(
             output_mel, log_det, pred_pitch = model(source_mel, ref_mel)
 
             # Generate audio
-            fake_audio = vocoder(output_mel)
-            real_audio = vocoder(target_mel)
+            fake_audio = vocoder(output_mel.transpose(1, 2))
+            real_audio = vocoder(target_mel.transpose(1, 2))
 
             # Discriminator forward
             real_outputs_msd, real_features_msd = msd(real_audio)
@@ -153,8 +212,8 @@ def train(
 
             # Generator loss
             losses = criterion(
-                output_mel,
-                target_mel,
+                fake_audio,
+                real_audio,
                 pred_pitch,
                 target_pitch,
                 log_det,
@@ -179,11 +238,15 @@ def train(
             optimizer_g.step()
             scheduler_g.step()
 
-            # Discriminator forward
+            # Discriminator forward on detached audio, so the generator graph
+            # from the step above is not traversed a second time.
             with torch.no_grad():
                 output_mel, _, _ = model(source_mel, ref_mel)
-                fake_audio = vocoder(output_mel)
+                fake_audio = vocoder(output_mel.transpose(1, 2))
+                real_audio = vocoder(target_mel.transpose(1, 2))
 
+            real_outputs_msd, _ = msd(real_audio)
+            real_outputs_mpd, _ = mpd(real_audio)
             fake_outputs_msd, _ = msd(fake_audio)
             fake_outputs_mpd, _ = mpd(fake_audio)
 
@@ -222,19 +285,29 @@ def train(
             )
 
         if (epoch + 1) % config.train.save_every == 0:
+            best_loss = min(best_loss, avg_gen_loss)
             checkpoint = {
                 "epoch": epoch + 1,
                 "model_state_dict": model.state_dict(),
                 "vocoder_state_dict": vocoder.state_dict(),
+                "msd_state_dict": msd.state_dict(),
+                "mpd_state_dict": mpd.state_dict(),
                 "optimizer_g_state_dict": optimizer_g.state_dict(),
                 "optimizer_d_state_dict": optimizer_d.state_dict(),
+                "scheduler_g_state_dict": scheduler_g.state_dict(),
+                "scheduler_d_state_dict": scheduler_d.state_dict(),
                 "gen_loss": avg_gen_loss,
                 "disc_loss": avg_disc_loss,
+                "best_loss": best_loss,
             }
             torch.save(checkpoint, output_dir / f"checkpoint_epoch_{epoch + 1}.pth")
+            # Stable filename so an interrupted run can be resumed without
+            # hunting for the highest epoch number.
+            torch.save(checkpoint, output_dir / "latest.pth")
+            if config.train.keep_last_checkpoints > 0:
+                _prune_checkpoints(output_dir, config.train.keep_last_checkpoints)
 
-            if avg_gen_loss < best_loss:
-                best_loss = avg_gen_loss
+            if avg_gen_loss <= best_loss:
                 torch.save(checkpoint, output_dir / "best.pth")
                 print(f"Saved best model (gen_loss={best_loss:.4f})")
 

@@ -10,26 +10,32 @@ class MelSpectrogramLoss(nn.Module):
 
     def __init__(self, n_mels_list: list[int] = [64, 128, 256]):
         super().__init__()
+        import torchaudio
+
         self.n_mels_list = n_mels_list
+        # Registered as submodules so the filterbanks are built once and follow
+        # the module onto whichever device training runs on.
+        self.transforms = nn.ModuleList([
+            torchaudio.transforms.MelSpectrogram(
+                sample_rate=44100,
+                n_fft=2048,
+                hop_length=512,
+                n_mels=n_mels,
+            )
+            for n_mels in n_mels_list
+        ])
 
     def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         loss = 0.0
-        for n_mels in self.n_mels_list:
-            pred_mel = self._compute_mel(pred, n_mels)
-            target_mel = self._compute_mel(target, n_mels)
+        for transform in self.transforms:
+            pred_mel = self._compute_mel(transform, pred)
+            target_mel = self._compute_mel(transform, target)
             loss += F.l1_loss(pred_mel, target_mel)
-        return loss / len(self.n_mels_list)
+        return loss / len(self.transforms)
 
-    def _compute_mel(self, audio: torch.Tensor, n_mels: int) -> torch.Tensor:
-        import torchaudio
-        mel_transform = torchaudio.transforms.MelSpectrogram(
-            sample_rate=44100,
-            n_fft=2048,
-            hop_length=512,
-            n_mels=n_mels,
-        )
-        mel = mel_transform(audio)
-        return torch.log(mel + 1e-7)
+    @staticmethod
+    def _compute_mel(transform: nn.Module, audio: torch.Tensor) -> torch.Tensor:
+        return torch.log(transform(audio) + 1e-7)
 
 
 class PerceptualLoss(nn.Module):
@@ -144,9 +150,13 @@ class TotalLoss(nn.Module):
         losses["perceptual"] = self.perceptual_loss(pred_mel, target_mel)
         losses["pitch"] = self.pitch_loss(pred_pitch, target_pitch)
 
-        # KL divergence for flow
+        # Flow Jacobian penalty. `-0.5 * mean(1 + log_det - log_det.exp())`
+        # overflowed to inf within a few updates: log_det is summed over every
+        # frame and channel, so exp() of it saturates. Penalise the per-frame
+        # magnitude instead, which keeps the affine scales near unity.
         if log_det is not None:
-            losses["kl"] = -0.5 * torch.mean(1 + log_det - log_det.exp())
+            n_frames = pred_pitch.shape[-1]
+            losses["kl"] = (log_det / n_frames).pow(2).mean()
 
         # Adversarial losses
         if disc_real_outputs is not None and disc_fake_outputs is not None:

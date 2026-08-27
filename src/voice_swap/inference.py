@@ -175,7 +175,8 @@ def convert_song(
 
     # Extract features
     ref_features = extract_features(ref_audio, config)
-    ref_mel = torch.tensor(ref_features["mel"]).unsqueeze(0).to(device)
+    # extract_features returns (n_mels, frames); the model works on (batch, frames, n_mels).
+    ref_mel = torch.tensor(ref_features["mel"]).T.unsqueeze(0).to(device)
 
     # Process in overlapping segments
     segment_length = config.audio.segment_length
@@ -193,11 +194,11 @@ def convert_song(
             continue
 
         features = extract_features(segment, config)
-        source_mel = torch.tensor(features["mel"]).unsqueeze(0).to(device)
+        source_mel = torch.tensor(features["mel"]).T.unsqueeze(0).to(device)
 
         with torch.no_grad():
             converted_mel = model.convert(source_mel, ref_mel)
-            converted_audio = vocoder(converted_mel).squeeze().cpu().numpy()
+            converted_audio = vocoder(converted_mel.transpose(1, 2)).squeeze().cpu().numpy()
 
         if smooth:
             converted_audio = smooth_audio(converted_audio, config.audio.sample_rate)
